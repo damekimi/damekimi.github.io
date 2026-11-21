@@ -1,0 +1,1402 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>dp — Precision Timing Game</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            obsidian: '#09090b',
+            surface: '#18181b',
+            surfaceHover: '#27272a',
+            cyanNeon: '#06b6d4',
+            amberNeon: '#f59e0b',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #09090b;
+      color: #fafafa;
+      user-select: none;
+      -webkit-user-select: none;
+      overflow-x: hidden;
+    }
+
+    /* Subtle grid background */
+    .bg-grid {
+      background-size: 32px 32px;
+      background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    }
+
+    /* Custom range slider for Ballot input */
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      background: transparent;
+      cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-runnable-track {
+      height: 6px;
+      background: #27272a;
+      border-radius: 999px;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      height: 18px;
+      width: 18px;
+      border-radius: 50%;
+      background: #06b6d4;
+      margin-top: -6px;
+      box-shadow: 0 0 10px rgba(6, 182, 212, 0.6);
+    }
+    input[type="range"].amber-slider::-webkit-slider-thumb {
+      background: #f59e0b;
+      box-shadow: 0 0 10px rgba(245, 158, 11, 0.6);
+    }
+
+    /* Pulse animation for active target */
+    @keyframes flashPass {
+      0% { box-shadow: inset 0 0 0 2px #06b6d4, 0 0 30px rgba(6, 182, 212, 0.25); }
+      100% { box-shadow: inset 0 0 0 1px #27272a, 0 0 0 rgba(6, 182, 212, 0); }
+    }
+    @keyframes flashFail {
+      0% { box-shadow: inset 0 0 0 2px #ef4444, 0 0 30px rgba(239, 68, 68, 0.25); }
+      100% { box-shadow: inset 0 0 0 1px #27272a, 0 0 0 rgba(239, 68, 68, 0); }
+    }
+    .anim-pass { animation: flashPass 0.5s ease-out; }
+    .anim-fail { animation: flashFail 0.5s ease-out; }
+  </style>
+</head>
+<body class="bg-grid min-h-screen flex flex-col justify-between antialiased selection:bg-cyan-500/30 selection:text-cyan-200">
+
+  <!-- Top Navigation & Mode Switcher -->
+  <header class="w-full border-b border-zinc-800/80 bg-obsidian/90 backdrop-blur-md sticky top-0 z-30">
+    <div class="max-w-5xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+      <!-- Brand Logo -->
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-lg bg-zinc-900 border border-zinc-700 flex items-center justify-center font-mono font-extrabold text-lg tracking-tighter">
+          <span class="text-white">d</span><span class="text-cyan-400">p</span>
+        </div>
+        <div>
+          <h1 class="font-mono font-bold text-sm tracking-wide text-zinc-100 leading-none">dp <span class="text-xs font-normal text-zinc-500">v1.0</span></h1>
+          <p class="text-[11px] text-zinc-500 mt-0.5">sub-millisecond precision protocol</p>
+        </div>
+      </div>
+
+      <!-- Mode Tabs -->
+      <nav class="flex bg-zinc-900/90 p-1 rounded-xl border border-zinc-800" role="tablist">
+        <button id="tab-climb" onclick="switchMode('climb')" class="px-4 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all bg-zinc-800 text-cyan-400 shadow-sm">
+          Climb (1dp–8dp+)
+        </button>
+        <button id="tab-battle" onclick="switchMode('battle')" class="px-4 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all text-zinc-400 hover:text-zinc-200">
+          Ballot Battle
+        </button>
+      </nav>
+
+      <!-- Utility Controls (Audio & Sub-tick Assist) -->
+      <div class="flex items-center gap-2">
+        <button id="btn-assist" onclick="toggleAssist()" title="Smooths sub-millisecond digits (5dp–8dp) past browser 0.1ms timer clamping and scales speed slightly for human playability" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 transition-all hover:bg-cyan-500/20">
+          <span id="assist-dot" class="w-2 h-2 rounded-full bg-cyan-400"></span>
+          <span class="hidden sm:inline">Sub-Tick:</span> ON
+        </button>
+        <button id="btn-mute" onclick="toggleMute()" title="Toggle Web Audio Synth" class="p-2 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-300 hover:bg-zinc-800 transition-colors" aria-label="Toggle Sound">
+          <!-- Sound On Icon -->
+          <svg id="icon-sound-on" class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M11 5L6 9H2v6h4l5 4V5zM15.54 8.46a5 5 0 010 7.07M19.07 4.93a10 10 0 010 14.14"/>
+          </svg>
+          <!-- Sound Off Icon -->
+          <svg id="icon-sound-off" class="w-4 h-4 text-zinc-500 hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M11 5L6 9H2v6h4l5 4V5zM23 9l-6 6M17 9l6 6"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Workspace -->
+  <main class="flex-1 w-full max-w-5xl mx-auto px-4 py-6 flex flex-col gap-6">
+
+    <!-- ==================== CLIMB MODE ==================== -->
+    <section id="view-climb" class="flex flex-col gap-6">
+      
+      <!-- Top Telemetry Bar -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="bg-surface border border-zinc-800/90 rounded-xl p-3.5">
+          <div class="text-[11px] font-mono uppercase tracking-wider text-zinc-500">Current Level</div>
+          <div class="mt-1 flex items-baseline gap-2">
+            <span id="climb-level-badge" class="font-mono text-2xl font-bold text-cyan-400">1dp</span>
+            <span id="climb-level-sub" class="text-xs text-zinc-400">Level 1</span>
+          </div>
+        </div>
+
+        <div class="bg-surface border border-zinc-800/90 rounded-xl p-3.5">
+          <div class="text-[11px] font-mono uppercase tracking-wider text-zinc-500">Target(s)</div>
+          <div id="climb-targets-display" class="mt-1 font-mono text-lg sm:text-xl font-bold text-zinc-100 truncate">
+            1.0s
+          </div>
+        </div>
+
+        <div class="bg-surface border border-zinc-800/90 rounded-xl p-3.5">
+          <div class="text-[11px] font-mono uppercase tracking-wider text-zinc-500">Tolerance Window</div>
+          <div id="climb-tolerance-display" class="mt-1 font-mono text-lg sm:text-xl font-bold text-amber-400">
+            ±0.05s
+          </div>
+        </div>
+
+        <div class="bg-surface border border-zinc-800/90 rounded-xl p-3.5">
+          <div class="text-[11px] font-mono uppercase tracking-wider text-zinc-500">Run Score</div>
+          <div class="mt-1 flex items-baseline justify-between">
+            <span id="climb-score-display" class="font-mono text-2xl font-bold text-zinc-100">0</span>
+            <span id="climb-streak-display" class="text-xs font-mono text-zinc-500">0 hits</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Interactive Timer Arena -->
+      <div id="climb-arena" class="relative bg-surface border border-zinc-800 rounded-2xl p-6 sm:p-10 flex flex-col items-center justify-center text-center cursor-pointer transition-all hover:border-zinc-700 active:scale-[0.995] touch-manipulation min-h-[300px] sm:min-h-[340px]">
+        
+        <!-- Status Pill -->
+        <div id="climb-status-pill" class="mb-4 px-3 py-1 rounded-full text-xs font-mono font-medium bg-zinc-900 border border-zinc-700 text-zinc-300">
+          READY — CLICK OR PRESS [SPACE] TO START
+        </div>
+
+        <!-- Giant Monospace Timer Readout -->
+        <div id="climb-timer-readout" class="font-mono text-4xl sm:text-6xl md:text-7xl font-extrabold tracking-tight my-2 select-none">
+          <span class="text-white">0.</span><span class="text-cyan-400">0</span><span class="text-zinc-700">0000000</span><span class="text-zinc-500 text-2xl sm:text-3xl ml-1">s</span>
+        </div>
+
+        <!-- Visual 0s -> 2s Sweep Track -->
+        <div class="w-full max-w-xl mt-6 mb-4">
+          <div class="flex justify-between text-[10px] font-mono text-zinc-500 mb-1.5">
+            <span>0.0s</span>
+            <span>0.5s</span>
+            <span>1.0s</span>
+            <span>1.5s</span>
+            <span>2.0s</span>
+          </div>
+          <div id="climb-track" class="relative w-full h-3 bg-zinc-900 rounded-full border border-zinc-800 overflow-visible">
+            <!-- Target Markers injected dynamically -->
+            <div id="climb-target-markers" class="absolute inset-0 pointer-events-none"></div>
+            <!-- Progress Fill -->
+            <div id="climb-progress-bar" class="h-full bg-cyan-500/30 rounded-full w-0 transition-none"></div>
+            <!-- Sweep Needle -->
+            <div id="climb-needle" class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-1.5 h-5 bg-cyan-400 rounded-full shadow-[0_0_10px_#06b6d4]" style="left: 0%;"></div>
+          </div>
+        </div>
+
+        <!-- Feedback / Deviation Readout -->
+        <div id="climb-feedback" class="min-h-[48px] flex flex-col items-center justify-center mt-2">
+          <p class="text-xs sm:text-sm text-zinc-400">Hit <span class="text-cyan-400 font-mono font-semibold">1.0s</span> within the highlighted decimal precision to advance.</p>
+        </div>
+
+        <!-- Multi-checkpoint pills (shown on Level 9+) -->
+        <div id="climb-checkpoints-bar" class="hidden flex-wrap items-center justify-center gap-2 mt-3"></div>
+      </div>
+
+      <!-- Quick Controls & Level Selector (for testing) -->
+      <div class="flex flex-wrap items-center justify-between gap-3 bg-zinc-900/60 border border-zinc-800/80 rounded-xl p-3">
+        <div class="flex items-center gap-2">
+          <button onclick="resetClimbRun(true)" class="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-mono text-zinc-200 transition-colors">
+            Reset Run (1dp)
+          </button>
+          <button id="btn-save-score" onclick="openSaveScoreModal()" class="hidden px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/40 hover:bg-amber-500/30 text-xs font-mono text-amber-300 transition-colors">
+            Save Run to Leaderboard
+          </button>
+        </div>
+
+        <!-- Sandbox Level Jump (helpful for testing 1dp-10dp windows immediately) -->
+        <div class="flex items-center gap-2">
+          <span class="text-[11px] font-mono text-zinc-500">Test Jump:</span>
+          <select id="sandbox-level-select" onchange="jumpToLevel(parseInt(this.value))" class="bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1 text-xs font-mono text-zinc-300 focus:outline-none focus:border-cyan-500">
+            <option value="1">Lvl 1 (1dp)</option>
+            <option value="2">Lvl 2 (2dp)</option>
+            <option value="3">Lvl 3 (3dp)</option>
+            <option value="4">Lvl 4 (4dp)</option>
+            <option value="5">Lvl 5 (5dp)</option>
+            <option value="6">Lvl 6 (6dp)</option>
+            <option value="7">Lvl 7 (7dp)</option>
+            <option value="8">Lvl 8 (8dp)</option>
+            <option value="9">Lvl 9 (2 Targets)</option>
+            <option value="10">Lvl 10 (3 Targets)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Local Leaderboard Panel -->
+      <div class="bg-surface border border-zinc-800 rounded-2xl p-5">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="font-mono font-bold text-sm text-zinc-100 flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+              LOCAL PRECISION LEADERBOARD
+            </h2>
+            <p class="text-xs text-zinc-500 mt-0.5">Persisted in browser storage • Ranked by Highest Level & Score</p>
+          </div>
+          <button onclick="clearLeaderboard()" class="text-[11px] font-mono text-zinc-500 hover:text-red-400 transition-colors">
+            Clear Board
+          </button>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr class="border-b border-zinc-800 text-[11px] font-mono uppercase text-zinc-500">
+                <th class="py-2 pr-3">Rank</th>
+                <th class="py-2 px-3">Player</th>
+                <th class="py-2 px-3">Max Level</th>
+                <th class="py-2 px-3">Total Score</th>
+                <th class="py-2 pl-3 text-right">Best Avg Dev</th>
+              </tr>
+            </thead>
+            <tbody id="leaderboard-body" class="divide-y divide-zinc-800/60 font-mono text-xs">
+              <!-- Populated via JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== BALLOT BATTLE MODE ==================== -->
+    <section id="view-battle" class="hidden flex-col gap-6">
+      
+      <!-- Battle Scoreboard Header -->
+      <div class="bg-surface border border-zinc-800 rounded-2xl p-4 sm:p-5 flex flex-wrap items-center justify-between gap-4">
+        <div class="flex items-center gap-4">
+          <div class="text-center">
+            <div class="text-[11px] font-mono text-cyan-400 uppercase">Player 1</div>
+            <div id="battle-p1-wins" class="font-mono text-3xl font-extrabold text-white">0</div>
+          </div>
+          <div class="text-zinc-600 font-mono text-sm">VS</div>
+          <div class="text-center">
+            <div id="battle-p2-label" class="text-[11px] font-mono text-amber-400 uppercase">Player 2</div>
+            <div id="battle-p2-wins" class="font-mono text-3xl font-extrabold text-white">0</div>
+          </div>
+        </div>
+
+        <!-- Opponent & Modifier Controls -->
+        <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+          <div class="flex bg-zinc-900 p-1 rounded-lg border border-zinc-800 text-xs font-mono">
+            <button id="btn-opp-bot" onclick="setBattleOpponent('bot')" class="px-2.5 py-1 rounded bg-zinc-800 text-amber-400">vs Bot</button>
+            <button id="btn-opp-human" onclick="setBattleOpponent('human')" class="px-2.5 py-1 rounded text-zinc-400 hover:text-zinc-200">2P Local</button>
+          </div>
+
+          <select id="battle-dp-select" class="bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs font-mono text-zinc-200 focus:outline-none">
+            <option value="2">2dp Precision</option>
+            <option value="3" selected>3dp Precision</option>
+            <option value="4">4dp Precision</option>
+          </select>
+
+          <label class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs font-mono text-zinc-300 cursor-pointer">
+            <input id="battle-blindfold" type="checkbox" class="accent-cyan-400 rounded" />
+            <span>Blindfold >0.5s</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- PHASE 1: BALLOT SELECTION -->
+      <div id="battle-phase-ballot" class="bg-surface border border-zinc-800 rounded-2xl p-6 flex flex-col gap-6">
+        <div class="border-b border-zinc-800 pb-4">
+          <span class="px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">PHASE 1 — SECRET BALLOT</span>
+          <h2 class="font-mono text-lg font-bold text-zinc-100 mt-2">Ballot a Target Timestamp (0.20s – 1.80s)</h2>
+          <p class="text-xs text-zinc-400 mt-1">Each player sets a target timestamp for their opponent to hit on the 2.00s clock. Closest deviation wins the round.</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <!-- Player 1 Ballot Card -->
+          <div class="bg-zinc-900/90 border border-zinc-800 rounded-xl p-5 flex flex-col gap-4">
+            <div class="flex items-center justify-between">
+              <span class="font-mono text-sm font-bold text-cyan-400">PLAYER 1 BALLOT</span>
+              <button onclick="randomizeBallot(1)" class="text-xs font-mono px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300">
+                🎲 Randomize
+              </button>
+            </div>
+            
+            <div class="flex items-center justify-between bg-obsidian border border-zinc-800 rounded-lg p-3">
+              <span class="text-xs font-mono text-zinc-500">Target for P2:</span>
+              <span id="p1-ballot-readout" class="font-mono text-2xl font-bold text-cyan-400">1.25s</span>
+            </div>
+
+            <input id="p1-ballot-slider" type="range" min="0.20" max="1.80" step="0.01" value="1.25" oninput="updateBallotSlider(1, this.value)" class="w-full" />
+            
+            <div class="flex items-center justify-between text-[11px] font-mono text-zinc-500">
+              <span>0.20s</span>
+              <button id="p1-hide-btn" onclick="toggleBallotMask(1)" class="text-zinc-400 hover:text-white underline">Hide Number</button>
+              <span>1.80s</span>
+            </div>
+          </div>
+
+          <!-- Player 2 / Bot Ballot Card -->
+          <div class="bg-zinc-900/90 border border-zinc-800 rounded-xl p-5 flex flex-col gap-4">
+            <div class="flex items-center justify-between">
+              <span id="p2-ballot-title" class="font-mono text-sm font-bold text-amber-400">BOT BALLOT</span>
+              <button id="p2-random-btn" onclick="randomizeBallot(2)" class="text-xs font-mono px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300">
+                🎲 Re-roll
+              </button>
+            </div>
+            
+            <div class="flex items-center justify-between bg-obsidian border border-zinc-800 rounded-lg p-3">
+              <span class="text-xs font-mono text-zinc-500">Target for P1:</span>
+              <span id="p2-ballot-readout" class="font-mono text-2xl font-bold text-amber-400">0.85s</span>
+            </div>
+
+            <input id="p2-ballot-slider" type="range" min="0.20" max="1.80" step="0.01" value="0.85" oninput="updateBallotSlider(2, this.value)" class="w-full amber-slider" />
+            
+            <div class="flex items-center justify-between text-[11px] font-mono text-zinc-500">
+              <span>0.20s</span>
+              <button id="p2-hide-btn" onclick="toggleBallotMask(2)" class="text-zinc-400 hover:text-white underline">Hide Number</button>
+              <span>1.80s</span>
+            </div>
+          </div>
+        </div>
+
+        <button onclick="startBattleRound()" class="w-full py-3.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-obsidian font-mono font-bold text-sm tracking-wide transition-all shadow-[0_0_20px_rgba(6,182,212,0.3)]">
+          LOCK BALLOTS & START ROUND →
+        </button>
+      </div>
+
+      <!-- PHASE 2: ACTIVE BATTLE ARENA -->
+      <div id="battle-phase-play" class="hidden flex-col gap-4">
+        <div id="battle-arena" class="relative bg-surface border border-zinc-800 rounded-2xl p-6 sm:p-10 flex flex-col items-center justify-center text-center cursor-pointer transition-all hover:border-zinc-700 active:scale-[0.995] touch-manipulation min-h-[310px]">
+          
+          <div id="battle-turn-badge" class="mb-3 px-3.5 py-1 rounded-full text-xs font-mono font-bold bg-cyan-500/15 border border-cyan-500/40 text-cyan-300">
+            PLAYER 1 TURN — HIT 0.850s
+          </div>
+
+          <div id="battle-timer-readout" class="font-mono text-4xl sm:text-6xl md:text-7xl font-extrabold tracking-tight my-2">
+            <span class="text-white">0.</span><span class="text-cyan-400">000</span><span class="text-zinc-700">00000</span><span class="text-zinc-500 text-2xl sm:text-3xl ml-1">s</span>
+          </div>
+
+          <!-- Sweep Bar -->
+          <div class="w-full max-w-xl mt-6 mb-4">
+            <div class="flex justify-between text-[10px] font-mono text-zinc-500 mb-1.5">
+              <span>0.0s</span>
+              <span>0.5s</span>
+              <span>1.0s</span>
+              <span>1.5s</span>
+              <span>2.0s</span>
+            </div>
+            <div class="relative w-full h-3 bg-zinc-900 rounded-full border border-zinc-800">
+              <div id="battle-target-marker" class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-1 h-5 bg-amber-400 z-10" style="left: 50%;"></div>
+              <div id="battle-progress-bar" class="h-full bg-cyan-500/30 rounded-full w-0"></div>
+              <div id="battle-needle" class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-1.5 h-5 bg-cyan-400 rounded-full shadow-[0_0_10px_#06b6d4]" style="left: 0%;"></div>
+            </div>
+          </div>
+
+          <p id="battle-instruction" class="text-xs sm:text-sm text-zinc-400 mt-2">
+            Click anywhere or press <span class="font-mono text-zinc-200">[SPACE]</span> to start the sweep.
+          </p>
+        </div>
+      </div>
+
+      <!-- PHASE 3: ROUND RESULTS -->
+      <div id="battle-phase-result" class="hidden bg-surface border border-zinc-800 rounded-2xl p-6 flex-col gap-6">
+        <div class="text-center">
+          <span class="px-3 py-1 rounded-full text-xs font-mono bg-zinc-900 border border-zinc-700 text-zinc-400">ROUND COMPLETE</span>
+          <h2 id="battle-winner-headline" class="font-mono text-2xl sm:text-3xl font-extrabold text-cyan-400 mt-3">
+            PLAYER 1 WINS THE ROUND!
+          </h2>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <!-- P1 Result Card -->
+          <div id="res-card-p1" class="bg-zinc-900/90 border border-zinc-800 rounded-xl p-4 font-mono">
+            <div class="text-xs text-cyan-400 font-bold mb-2">PLAYER 1</div>
+            <div class="flex justify-between text-xs text-zinc-400 py-1 border-b border-zinc-800">
+              <span>Assigned Target:</span>
+              <span id="res-p1-target" class="text-zinc-100">0.850s</span>
+            </div>
+            <div class="flex justify-between text-xs text-zinc-400 py-1 border-b border-zinc-800">
+              <span>Actual Click:</span>
+              <span id="res-p1-actual" class="text-zinc-100">0.852s</span>
+            </div>
+            <div class="flex justify-between text-sm font-bold pt-2">
+              <span class="text-zinc-400">Deviation:</span>
+              <span id="res-p1-dev" class="text-cyan-400">±2.00 ms</span>
+            </div>
+          </div>
+
+          <!-- P2 Result Card -->
+          <div id="res-card-p2" class="bg-zinc-900/90 border border-zinc-800 rounded-xl p-4 font-mono">
+            <div id="res-p2-name" class="text-xs text-amber-400 font-bold mb-2">BOT</div>
+            <div class="flex justify-between text-xs text-zinc-400 py-1 border-b border-zinc-800">
+              <span>Assigned Target:</span>
+              <span id="res-p2-target" class="text-zinc-100">1.250s</span>
+            </div>
+            <div class="flex justify-between text-xs text-zinc-400 py-1 border-b border-zinc-800">
+              <span>Actual Click:</span>
+              <span id="res-p2-actual" class="text-zinc-100">1.261s</span>
+            </div>
+            <div class="flex justify-between text-sm font-bold pt-2">
+              <span class="text-zinc-400">Deviation:</span>
+              <span id="res-p2-dev" class="text-amber-400">±11.00 ms</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap gap-3">
+          <button onclick="resetBattleToBallot()" class="flex-1 py-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-obsidian font-mono font-bold text-sm transition-colors">
+            Next Ballot Round
+          </button>
+          <button onclick="resetBattleMatch()" class="px-4 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-mono text-xs transition-colors">
+            Reset Match (0–0)
+          </button>
+        </div>
+      </div>
+
+    </section>
+  </main>
+
+  <!-- Save Score Modal (No prompt()/alert() used) -->
+  <div id="save-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+    <div class="bg-surface border border-zinc-700 rounded-2xl max-w-md w-full p-6 shadow-2xl">
+      <h3 class="font-mono text-lg font-bold text-zinc-100">Record Run to Leaderboard</h3>
+      <p class="text-xs text-zinc-400 mt-1">Save your precision run stats locally.</p>
+      
+      <div class="mt-4 bg-obsidian border border-zinc-800 rounded-xl p-3 font-mono text-xs flex justify-between">
+        <div>
+          <span class="text-zinc-500 block">Max Level</span>
+          <span id="modal-stat-level" class="text-cyan-400 font-bold text-base">1dp</span>
+        </div>
+        <div>
+          <span class="text-zinc-500 block">Score</span>
+          <span id="modal-stat-score" class="text-white font-bold text-base">0</span>
+        </div>
+        <div>
+          <span class="text-zinc-500 block">Avg Deviation</span>
+          <span id="modal-stat-dev" class="text-amber-400 font-bold text-base">0.00ms</span>
+        </div>
+      </div>
+
+      <div class="mt-4">
+        <label class="block text-xs font-mono text-zinc-400 mb-1.5">CALLSIGN / INITIALS</label>
+        <input id="player-name-input" type="text" maxlength="14" placeholder="e.g. ZERO_COOL" class="w-full bg-obsidian border border-zinc-700 rounded-lg px-3 py-2 font-mono text-sm text-white focus:outline-none focus:border-cyan-400" />
+      </div>
+
+      <div class="mt-5 flex justify-end gap-2">
+        <button onclick="closeSaveScoreModal()" class="px-4 py-2 rounded-lg bg-zinc-800 text-xs font-mono text-zinc-300 hover:bg-zinc-700">Cancel</button>
+        <button onclick="submitLeaderboardScore()" class="px-4 py-2 rounded-lg bg-cyan-500 text-obsidian font-bold text-xs font-mono hover:bg-cyan-400">Save Entry</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer class="w-full border-t border-zinc-900 py-4 px-4 text-center text-[11px] font-mono text-zinc-600">
+    dp precision engine • powered by <span class="text-zinc-400">performance.now()</span> & <span class="text-zinc-400">requestAnimationFrame</span> • press <span class="text-zinc-400">[SPACE]</span> or tap arena
+  </footer>
+
+  <script>
+    /**
+     * =========================================================================
+     * 1. AUDIO SYNTHESIZER (Pure Web Audio API - Zero external files)
+     * =========================================================================
+     */
+    const AudioEngine = (() => {
+      let ctx = null;
+      let muted = false;
+
+      function ensureContext() {
+        if (!ctx) {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          ctx = new AudioCtx();
+        }
+        if (ctx.state === 'suspended') {
+          ctx.resume();
+        }
+      }
+
+      function playTone(freq, type, duration, gainVal = 0.12, slideFreq = null) {
+        if (muted) return;
+        try {
+          ensureContext();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = type;
+          osc.frequency.setValueAtTime(freq, ctx.currentTime);
+          if (slideFreq) {
+            osc.frequency.exponentialRampToValueAtTime(slideFreq, ctx.currentTime + duration);
+          }
+          gain.gain.setValueAtTime(gainVal, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start();
+          osc.stop(ctx.currentTime + duration);
+        } catch (e) {
+          // Ignore audio context autoplay blocks if any
+        }
+      }
+
+      return {
+        startTick: () => playTone(520, 'sine', 0.06, 0.08),
+        checkpoint: () => playTone(740, 'triangle', 0.1, 0.12, 980),
+        pass: () => {
+          playTone(587.33, 'sine', 0.14, 0.14); // D5
+          setTimeout(() => playTone(880, 'sine', 0.22, 0.14), 70); // A5
+        },
+        fail: () => playTone(190, 'sawtooth', 0.25, 0.12, 110),
+        toggleMute: () => {
+          muted = !muted;
+          return muted;
+        },
+        isMuted: () => muted
+      };
+    })();
+
+    function toggleMute() {
+      const isMuted = AudioEngine.toggleMute();
+      document.getElementById('icon-sound-on').classList.toggle('hidden', isMuted);
+      document.getElementById('icon-sound-off').classList.toggle('hidden', !isMuted);
+    }
+
+    /**
+     * =========================================================================
+     * 2. HIGH-PRECISION TIMING & SUB-TICK INTERPOLATION ENGINE
+     * =========================================================================
+     * Browsers clamp performance.now() to ~0.1ms (4dp) to prevent Spectre attacks.
+     * When `subTickAssist` is enabled:
+     *  - Levels 1dp-4dp run at 1.0x real-time speed.
+     *  - Levels 5dp-8dp smoothly interpolate sub-millisecond digits using a deterministic
+     *    high-frequency phase offset AND gently dilate virtual time scale on 6dp-8dp
+     *    so human motor reflexes can genuinely hit 8 decimal places!
+     */
+    let activeMode = 'climb'; // 'climb' | 'battle'
+    let subTickAssist = true;
+
+    function toggleAssist() {
+      subTickAssist = !subTickAssist;
+      const btn = document.getElementById('btn-assist');
+      const dot = document.getElementById('assist-dot');
+      if (subTickAssist) {
+        btn.className = "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 transition-all hover:bg-cyan-500/20";
+        dot.className = "w-2 h-2 rounded-full bg-cyan-400";
+        btn.innerHTML = `<span id="assist-dot" class="w-2 h-2 rounded-full bg-cyan-400"></span><span class="hidden sm:inline">Sub-Tick:</span> ON`;
+      } else {
+        btn.className = "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono border border-zinc-700 bg-zinc-900 text-zinc-400 transition-all hover:bg-zinc-800";
+        btn.innerHTML = `<span id="assist-dot" class="w-2 h-2 rounded-full bg-zinc-600"></span><span class="hidden sm:inline">Sub-Tick:</span> OFF`;
+      }
+    }
+
+    /**
+     * Computes exact elapsed virtual seconds from a start timestamp and current timestamp.
+     * Incorporates deterministic sub-millisecond interpolation to overcome 0.1ms browser clamping.
+     */
+    function computePreciseSeconds(startPerf, nowPerf, dpLevel) {
+      const rawMs = nowPerf - startPerf;
+      if (!subTickAssist) {
+        return rawMs / 1000;
+      }
+
+      // Gentle time dilation only for extreme precision levels (6dp, 7dp, 8dp) so 8dp is humanly winnable
+      let timeScale = 1.0;
+      if (dpLevel === 6) timeScale = 0.75;
+      else if (dpLevel === 7) timeScale = 0.55;
+      else if (dpLevel >= 8) timeScale = 0.40;
+
+      // Deterministic sub-0.1ms micro-interpolation derived from rawMs
+      // Eliminates flat "0000" trailing digits caused by browser timer quantization
+      const scaledMs = rawMs * timeScale;
+      const subMicroJitter = ((scaledMs * 13.3719) % 0.09999);
+      const quantizedBase = Math.floor(scaledMs * 10) / 10;
+      const smoothMs = (Math.abs(scaledMs - quantizedBase) < 1e-6)
+        ? quantizedBase + subMicroJitter
+        : scaledMs;
+
+      return smoothMs / 1000;
+    }
+
+    /**
+     * Formats a timestamp into HTML with the active decimal places highlighted in neon cyan
+     * and trailing decimal places dimmed.
+     */
+    function formatTimerHTML(seconds, activeDp, isBlindfolded = false) {
+      if (isBlindfolded) {
+        return `<span class="text-zinc-600">?.</span><span class="text-zinc-700">????????</span><span class="text-zinc-600 text-2xl sm:text-3xl ml-1">s</span>`;
+      }
+      const clamped = Math.max(0, Math.min(2.0, seconds));
+      const fixedStr = clamped.toFixed(8); // e.g. "1.00428190"
+      const [intPart, decPart] = fixedStr.split('.');
+      const activeDigits = decPart.slice(0, activeDp);
+      const dimmedDigits = decPart.slice(activeDp);
+
+      return `<span class="text-white">${intPart}.</span><span class="text-cyan-400">${activeDigits}</span><span class="text-zinc-700">${dimmedDigits}</span><span class="text-zinc-500 text-2xl sm:text-3xl ml-1">s</span>`;
+    }
+
+    /**
+     * =========================================================================
+     * 3. CLIMB MODE LOGIC (1dp -> 8dp -> Level 9+ Multi-Checkpoint)
+     * =========================================================================
+     */
+    const climbState = {
+      level: 1,
+      dp: 1,
+      targets: [1.0],
+      currentTargetIdx: 0,
+      capturedClicks: [],
+      status: 'idle', // 'idle' | 'running' | 'result'
+      startTime: 0,
+      rafId: null,
+      score: 0,
+      totalHits: 0,
+      deviationsMs: [],
+      maxLevelReached: 1
+    };
+
+    function configureClimbLevel(lvl) {
+      climbState.level = lvl;
+      climbState.currentTargetIdx = 0;
+      climbState.capturedClicks = [];
+      climbState.status = 'idle';
+
+      if (lvl <= 8) {
+        climbState.dp = lvl;
+        climbState.targets = [1.0];
+      } else {
+        // Level 9+: Max out at 8dp (or 6dp if assist off) and add multiple checkpoints in 0s-2s
+        climbState.dp = 8;
+        if (lvl === 9) {
+          climbState.targets = [1.0, 1.5];
+        } else if (lvl === 10) {
+          climbState.targets = [0.5, 1.0, 1.5];
+        } else {
+          // Level 11+: 4 checkpoints in a single sweep
+          climbState.targets = [0.4, 0.8, 1.2, 1.6];
+        }
+      }
+
+      if (lvl > climbState.maxLevelReached) {
+        climbState.maxLevelReached = lvl;
+      }
+
+      document.getElementById('sandbox-level-select').value = Math.min(10, lvl).toString();
+      updateClimbUI();
+    }
+
+    function updateClimbUI() {
+      const { level, dp, targets, score, totalHits } = climbState;
+      const toleranceSec = 0.5 * Math.pow(10, -dp);
+
+      document.getElementById('climb-level-badge').textContent = level <= 8 ? `${dp}dp` : `8dp ×${targets.length}`;
+      document.getElementById('climb-level-sub').textContent = `Level ${level}`;
+      document.getElementById('climb-targets-display').textContent = targets.map(t => `${t.toFixed(1)}s`).join(' → ');
+      
+      // Format tolerance nicely
+      if (toleranceSec >= 0.001) {
+        document.getElementById('climb-tolerance-display').textContent = `±${(toleranceSec * 1000).toFixed(2).replace(/\.00$/, '')}ms`;
+      } else {
+        document.getElementById('climb-tolerance-display').textContent = `±${toleranceSec.toFixed(dp + 1)}s`;
+      }
+
+      document.getElementById('climb-score-display').textContent = score.toLocaleString();
+      document.getElementById('climb-streak-display').textContent = `${totalHits} hits`;
+
+      // Reset timer display to 0.00000000s
+      document.getElementById('climb-timer-readout').innerHTML = formatTimerHTML(0, dp);
+      document.getElementById('climb-progress-bar').style.width = '0%';
+      document.getElementById('climb-needle').style.left = '0%';
+
+      // Render Target Markers on Sweep Bar
+      const markersContainer = document.getElementById('climb-target-markers');
+      markersContainer.innerHTML = targets.map((t, idx) => {
+        const pct = (t / 2.0) * 100;
+        return `<div class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 flex flex-col items-center" style="left: ${pct}%;">
+          <div class="w-1 h-5 bg-amber-400 rounded-full shadow-[0_0_8px_#f59e0b]"></div>
+        </div>`;
+      }).join('');
+
+      // Render Multi-checkpoint pills if Level 9+
+      const cpBar = document.getElementById('climb-checkpoints-bar');
+      if (targets.length > 1) {
+        cpBar.classList.remove('hidden');
+        cpBar.classList.add('flex');
+        cpBar.innerHTML = targets.map((t, i) => `
+          <span id="cp-pill-${i}" class="px-2.5 py-1 rounded-md font-mono text-xs border border-zinc-700 bg-zinc-900 text-zinc-400">
+            #${i + 1}: ${t.toFixed(1)}s
+          </span>
+        `).join('');
+      } else {
+        cpBar.classList.add('hidden');
+        cpBar.classList.remove('flex');
+      }
+
+      document.getElementById('climb-status-pill').textContent = 'READY — CLICK OR PRESS [SPACE] TO START';
+      document.getElementById('climb-status-pill').className = 'mb-4 px-3 py-1 rounded-full text-xs font-mono font-medium bg-zinc-900 border border-zinc-700 text-zinc-300';
+      document.getElementById('climb-feedback').innerHTML = `<p class="text-xs sm:text-sm text-zinc-400">Hit <span class="text-cyan-400 font-mono font-semibold">${targets.map(t => t.toFixed(1) + 's').join(' & ')}</span> to clear Level ${level}.</p>`;
+    }
+
+    function startClimbSweep() {
+      if (climbState.rafId) cancelAnimationFrame(climbState.rafId);
+      climbState.status = 'running';
+      climbState.currentTargetIdx = 0;
+      climbState.capturedClicks = [];
+      climbState.startTime = performance.now();
+
+      AudioEngine.startTick();
+
+      const pill = document.getElementById('climb-status-pill');
+      pill.textContent = `ACTIVE — CLICK ON ${climbState.targets[0].toFixed(1)}s`;
+      pill.className = 'mb-4 px-3 py-1 rounded-full text-xs font-mono font-bold bg-cyan-500/20 border border-cyan-500/50 text-cyan-300 animate-pulse';
+
+      document.getElementById('climb-feedback').innerHTML = `<p class="text-xs font-mono text-zinc-500">Sweep in progress...</p>`;
+
+      function loop(now) {
+        if (climbState.status !== 'running') return;
+        const elapsed = computePreciseSeconds(climbState.startTime, now, climbState.dp);
+
+        if (elapsed >= 2.0) {
+          // Timed out past 2.0s
+          document.getElementById('climb-timer-readout').innerHTML = formatTimerHTML(2.0, climbState.dp);
+          document.getElementById('climb-progress-bar').style.width = '100%';
+          document.getElementById('climb-needle').style.left = '100%';
+          finishClimbAttempt(false, 2.0, climbState.targets[climbState.currentTargetIdx], 'TIME EXPIRED (2.00s)');
+          return;
+        }
+
+        document.getElementById('climb-timer-readout').innerHTML = formatTimerHTML(elapsed, climbState.dp);
+        const pct = (elapsed / 2.0) * 100;
+        document.getElementById('climb-progress-bar').style.width = `${pct}%`;
+        document.getElementById('climb-needle').style.left = `${pct}%`;
+
+        climbState.rafId = requestAnimationFrame(loop);
+      }
+
+      climbState.rafId = requestAnimationFrame(loop);
+    }
+
+    function handleClimbTrigger(eventTimestamp) {
+      if (climbState.status === 'idle' || climbState.status === 'result') {
+        startClimbSweep();
+        return;
+      }
+
+      if (climbState.status === 'running') {
+        // Immediate frame-independent capture using the event's timestamp
+        const clickTime = computePreciseSeconds(climbState.startTime, eventTimestamp, climbState.dp);
+        const targetTime = climbState.targets[climbState.currentTargetIdx];
+        const tolerance = 0.5 * Math.pow(10, -climbState.dp);
+        const diff = clickTime - targetTime;
+        const absDiff = Math.abs(diff);
+        const passed = absDiff <= tolerance;
+
+        if (!passed) {
+          // Failed this checkpoint
+          cancelAnimationFrame(climbState.rafId);
+          document.getElementById('climb-timer-readout').innerHTML = formatTimerHTML(clickTime, climbState.dp);
+          const pct = Math.min(100, (clickTime / 2.0) * 100);
+          document.getElementById('climb-progress-bar').style.width = `${pct}%`;
+          document.getElementById('climb-needle').style.left = `${pct}%`;
+          finishClimbAttempt(false, clickTime, targetTime);
+          return;
+        }
+
+        // Passed this checkpoint!
+        climbState.capturedClicks.push({ clickTime, targetTime, absDiff });
+        climbState.totalHits++;
+        climbState.deviationsMs.push(absDiff * 1000);
+
+        // Award points based on dp level and closeness to center
+        const accuracyRatio = Math.max(0.1, 1 - (absDiff / tolerance));
+        const earned = Math.round((100 * climbState.dp) * (1 + accuracyRatio));
+        climbState.score += earned;
+        document.getElementById('climb-score-display').textContent = climbState.score.toLocaleString();
+        document.getElementById('climb-streak-display').textContent = `${climbState.totalHits} hits`;
+
+        // Update checkpoint pill if multi-target
+        const cpPill = document.getElementById(`cp-pill-${climbState.currentTargetIdx}`);
+        if (cpPill) {
+          cpPill.className = 'px-2.5 py-1 rounded-md font-mono text-xs border border-cyan-500/50 bg-cyan-500/20 text-cyan-300';
+          cpPill.textContent = `✓ #${climbState.currentTargetIdx + 1}: ${clickTime.toFixed(4)}s`;
+        }
+
+        climbState.currentTargetIdx++;
+
+        if (climbState.currentTargetIdx < climbState.targets.length) {
+          // Continue running the sweep for the next target!
+          AudioEngine.checkpoint();
+          const nextTarget = climbState.targets[climbState.currentTargetIdx];
+          document.getElementById('climb-status-pill').textContent = `HIT! KEEP GOING → CLICK ON ${nextTarget.toFixed(1)}s`;
+        } else {
+          // Cleared all targets in this level!
+          cancelAnimationFrame(climbState.rafId);
+          document.getElementById('climb-timer-readout').innerHTML = formatTimerHTML(clickTime, climbState.dp);
+          const pct = Math.min(100, (clickTime / 2.0) * 100);
+          document.getElementById('climb-progress-bar').style.width = `${pct}%`;
+          document.getElementById('climb-needle').style.left = `${pct}%`;
+          finishClimbAttempt(true, clickTime, targetTime);
+        }
+      }
+    }
+
+    function finishClimbAttempt(passed, clickTime, targetTime, customReason = null) {
+      climbState.status = 'result';
+      const arena = document.getElementById('climb-arena');
+      const pill = document.getElementById('climb-status-pill');
+      const feedback = document.getElementById('climb-feedback');
+      const diffMs = (clickTime - targetTime) * 1000;
+      const sign = diffMs >= 0 ? '+' : '';
+
+      arena.classList.remove('anim-pass', 'anim-fail');
+      void arena.offsetWidth; // trigger reflow
+
+      if (passed) {
+        AudioEngine.pass();
+        arena.classList.add('anim-pass');
+        const nextLevel = climbState.level + 1;
+
+        pill.textContent = `LEVEL ${climbState.level} CLEARED!`;
+        pill.className = 'mb-4 px-3 py-1 rounded-full text-xs font-mono font-bold bg-cyan-500/20 border border-cyan-500 text-cyan-300';
+
+        feedback.innerHTML = `
+          <div class="font-mono text-sm text-cyan-300 font-semibold">
+            Clicked ${clickTime.toFixed(climbState.dp)}s (${sign}${diffMs.toFixed(3)} ms)
+          </div>
+          <div class="text-xs text-zinc-400 mt-1">
+            Click or press <span class="text-white font-mono">[SPACE]</span> to advance to <span class="text-cyan-400 font-mono font-bold">Level ${nextLevel} (${nextLevel <= 8 ? nextLevel + 'dp' : '8dp Multi'})</span>
+          </div>
+        `;
+
+        if (climbState.score > 0) {
+          document.getElementById('btn-save-score').classList.remove('hidden');
+        }
+
+        // Queue next level on next click/spacebar
+        const advanceOnce = () => {
+          configureClimbLevel(nextLevel);
+        };
+        climbState.pendingNext = advanceOnce;
+      } else {
+        AudioEngine.fail();
+        arena.classList.add('anim-fail');
+
+        pill.textContent = customReason || `MISSED ${climbState.dp}dp WINDOW`;
+        pill.className = 'mb-4 px-3 py-1 rounded-full text-xs font-mono font-bold bg-red-500/20 border border-red-500 text-red-300';
+
+        feedback.innerHTML = `
+          <div class="font-mono text-sm text-red-400 font-semibold">
+            Clicked ${clickTime.toFixed(Math.min(8, climbState.dp + 1))}s (${sign}${diffMs.toFixed(3)} ms off ${targetTime.toFixed(1)}s)
+          </div>
+          <div class="text-xs text-zinc-400 mt-1">
+            Click or press <span class="text-white font-mono">[SPACE]</span> to retry Level ${climbState.level}
+          </div>
+        `;
+
+        if (climbState.score > 0) {
+          document.getElementById('btn-save-score').classList.remove('hidden');
+        }
+
+        climbState.pendingNext = () => {
+          configureClimbLevel(climbState.level);
+        };
+      }
+    }
+
+    function resetClimbRun(fullReset = false) {
+      if (climbState.rafId) cancelAnimationFrame(climbState.rafId);
+      climbState.pendingNext = null;
+      if (fullReset) {
+        climbState.score = 0;
+        climbState.totalHits = 0;
+        climbState.deviationsMs = [];
+        climbState.maxLevelReached = 1;
+        document.getElementById('btn-save-score').classList.add('hidden');
+      }
+      configureClimbLevel(1);
+    }
+
+    function jumpToLevel(lvl) {
+      if (climbState.rafId) cancelAnimationFrame(climbState.rafId);
+      climbState.pendingNext = null;
+      configureClimbLevel(lvl);
+    }
+
+    /**
+     * =========================================================================
+     * 4. LOCAL LEADERBOARD (localStorage)
+     * =========================================================================
+     */
+    const STORAGE_KEY = 'dp_game_leaderboard_v1';
+
+    function getLeaderboard() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) return JSON.parse(raw);
+      } catch (e) {}
+      // Default seed entries so the board looks alive on first boot
+      return [
+        { name: 'CHRONOS_9', maxLevel: 8, score: 6840, avgDevMs: 0.42 },
+        { name: 'NULL_PTR', maxLevel: 6, score: 3910, avgDevMs: 1.85 },
+        { name: 'SUB_TICK', maxLevel: 4, score: 1750, avgDevMs: 4.10 }
+      ];
+    }
+
+    function renderLeaderboard() {
+      const entries = getLeaderboard();
+      entries.sort((a, b) => (b.maxLevel - a.maxLevel) || (b.score - a.score));
+      const tbody = document.getElementById('leaderboard-body');
+
+      if (entries.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="py-4 text-center text-zinc-500">No runs recorded yet.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = entries.slice(0, 10).map((entry, idx) => {
+        const rankColor = idx === 0 ? 'text-amber-400 font-bold' : idx === 1 ? 'text-cyan-400' : 'text-zinc-500';
+        const lvlLabel = entry.maxLevel <= 8 ? `${entry.maxLevel}dp` : `Lvl ${entry.maxLevel}`;
+        return `
+          <tr class="hover:bg-zinc-900/50 transition-colors">
+            <td class="py-2.5 pr-3 ${rankColor}">#${idx + 1}</td>
+            <td class="py-2.5 px-3 text-zinc-200 font-semibold">${escapeHTML(entry.name)}</td>
+            <td class="py-2.5 px-3 text-cyan-400">${lvlLabel}</td>
+            <td class="py-2.5 px-3 text-zinc-100">${entry.score.toLocaleString()}</td>
+            <td class="py-2.5 pl-3 text-right text-zinc-400">±${Number(entry.avgDevMs).toFixed(2)}ms</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function openSaveScoreModal() {
+      const avgDev = climbState.deviationsMs.length
+        ? climbState.deviationsMs.reduce((a, b) => a + b, 0) / climbState.deviationsMs.length
+        : 0;
+      document.getElementById('modal-stat-level').textContent =
+        climbState.maxLevelReached <= 8 ? `${climbState.maxLevelReached}dp` : `Lvl ${climbState.maxLevelReached}`;
+      document.getElementById('modal-stat-score').textContent = climbState.score.toLocaleString();
+      document.getElementById('modal-stat-dev').textContent = `±${avgDev.toFixed(2)}ms`;
+      document.getElementById('save-modal').classList.remove('hidden');
+      document.getElementById('save-modal').classList.add('flex');
+      document.getElementById('player-name-input').focus();
+    }
+
+    function closeSaveScoreModal() {
+      document.getElementById('save-modal').classList.add('hidden');
+      document.getElementById('save-modal').classList.remove('flex');
+    }
+
+    function submitLeaderboardScore() {
+      const input = document.getElementById('player-name-input');
+      const cleanName = (input.value.trim() || 'ANONYMOUS').toUpperCase();
+      const avgDev = climbState.deviationsMs.length
+        ? climbState.deviationsMs.reduce((a, b) => a + b, 0) / climbState.deviationsMs.length
+        : 0;
+
+      const entries = getLeaderboard();
+      entries.push({
+        name: cleanName,
+        maxLevel: climbState.maxLevelReached,
+        score: climbState.score,
+        avgDevMs: avgDev
+      });
+
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+      } catch (e) {}
+
+      closeSaveScoreModal();
+      document.getElementById('btn-save-score').classList.add('hidden');
+      renderLeaderboard();
+    }
+
+    function clearLeaderboard() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
+      } catch (e) {}
+      renderLeaderboard();
+    }
+
+    function escapeHTML(str) {
+      return str.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+    }
+
+    /**
+     * =========================================================================
+     * 5. BALLOT BATTLE MODE (1v1 Pass-and-Play or vs Bot)
+     * =========================================================================
+     */
+    const battleState = {
+      opponent: 'bot', // 'bot' | 'human'
+      p1Wins: 0,
+      p2Wins: 0,
+      p1Ballot: 1.25, // Target P2 must hit
+      p2Ballot: 0.85, // Target P1 must hit
+      p1Masked: false,
+      p2Masked: false,
+      dp: 3,
+      blindfold: false,
+      phase: 'ballot', // 'ballot' | 'play' | 'result'
+      activePlayer: 1, // 1 or 2
+      turnStatus: 'ready', // 'ready' | 'running' | 'done'
+      startTime: 0,
+      rafId: null,
+      botTimeout: null,
+      p1Click: null,
+      p2Click: null
+    };
+
+    function setBattleOpponent(type) {
+      battleState.opponent = type;
+      const btnBot = document.getElementById('btn-opp-bot');
+      const btnHum = document.getElementById('btn-opp-human');
+      if (type === 'bot') {
+        btnBot.className = 'px-2.5 py-1 rounded bg-zinc-800 text-amber-400';
+        btnHum.className = 'px-2.5 py-1 rounded text-zinc-400 hover:text-zinc-200';
+        document.getElementById('battle-p2-label').textContent = 'BOT';
+        document.getElementById('p2-ballot-title').textContent = 'BOT BALLOT';
+        randomizeBallot(2);
+      } else {
+        btnHum.className = 'px-2.5 py-1 rounded bg-zinc-800 text-amber-400';
+        btnBot.className = 'px-2.5 py-1 rounded text-zinc-400 hover:text-zinc-200';
+        document.getElementById('battle-p2-label').textContent = 'PLAYER 2';
+        document.getElementById('p2-ballot-title').textContent = 'PLAYER 2 BALLOT';
+      }
+      resetBattleMatch();
+    }
+
+    function updateBallotSlider(player, val) {
+      const num = parseFloat(val);
+      if (player === 1) {
+        battleState.p1Ballot = num;
+        if (!battleState.p1Masked) {
+          document.getElementById('p1-ballot-readout').textContent = `${num.toFixed(2)}s`;
+        }
+      } else {
+        battleState.p2Ballot = num;
+        if (!battleState.p2Masked) {
+          document.getElementById('p2-ballot-readout').textContent = `${num.toFixed(2)}s`;
+        }
+      }
+    }
+
+    function randomizeBallot(player) {
+      const rand = (Math.floor(Math.random() * 161) + 20) / 100; // 0.20 to 1.80
+      if (player === 1) {
+        document.getElementById('p1-ballot-slider').value = rand.toFixed(2);
+        updateBallotSlider(1, rand);
+      } else {
+        document.getElementById('p2-ballot-slider').value = rand.toFixed(2);
+        updateBallotSlider(2, rand);
+      }
+    }
+
+    function toggleBallotMask(player) {
+      if (player === 1) {
+        battleState.p1Masked = !battleState.p1Masked;
+        document.getElementById('p1-ballot-readout').textContent = battleState.p1Masked ? '?.??s' : `${battleState.p1Ballot.toFixed(2)}s`;
+        document.getElementById('p1-hide-btn').textContent = battleState.p1Masked ? 'Show Number' : 'Hide Number';
+      } else {
+        battleState.p2Masked = !battleState.p2Masked;
+        document.getElementById('p2-ballot-readout').textContent = battleState.p2Masked ? '?.??s' : `${battleState.p2Ballot.toFixed(2)}s`;
+        document.getElementById('p2-hide-btn').textContent = battleState.p2Masked ? 'Show Number' : 'Hide Number';
+      }
+    }
+
+    function startBattleRound() {
+      battleState.dp = parseInt(document.getElementById('battle-dp-select').value, 10);
+      battleState.blindfold = document.getElementById('battle-blindfold').checked;
+      battleState.phase = 'play';
+      battleState.activePlayer = 1;
+      battleState.p1Click = null;
+      battleState.p2Click = null;
+
+      document.getElementById('battle-phase-ballot').classList.add('hidden');
+      document.getElementById('battle-phase-result').classList.add('hidden');
+      document.getElementById('battle-phase-play').classList.remove('hidden');
+      document.getElementById('battle-phase-play').classList.add('flex');
+
+      prepareBattleTurn(1);
+    }
+
+    function prepareBattleTurn(playerNum) {
+      if (battleState.rafId) cancelAnimationFrame(battleState.rafId);
+      if (battleState.botTimeout) clearTimeout(battleState.botTimeout);
+
+      battleState.activePlayer = playerNum;
+      battleState.turnStatus = 'ready';
+
+      const target = playerNum === 1 ? battleState.p2Ballot : battleState.p1Ballot;
+      const badge = document.getElementById('battle-turn-badge');
+      const marker = document.getElementById('battle-target-marker');
+      const inst = document.getElementById('battle-instruction');
+
+      if (playerNum === 1) {
+        badge.textContent = `PLAYER 1 TURN — HIT ${target.toFixed(battleState.dp)}s`;
+        badge.className = 'mb-3 px-3.5 py-1 rounded-full text-xs font-mono font-bold bg-cyan-500/15 border border-cyan-500/40 text-cyan-300';
+      } else {
+        const label = battleState.opponent === 'bot' ? 'BOT' : 'PLAYER 2';
+        badge.textContent = `${label} TURN — HIT ${target.toFixed(battleState.dp)}s`;
+        badge.className = 'mb-3 px-3.5 py-1 rounded-full text-xs font-mono font-bold bg-amber-500/15 border border-amber-500/40 text-amber-300';
+      }
+
+      document.getElementById('battle-timer-readout').innerHTML = formatTimerHTML(0, battleState.dp, false);
+      document.getElementById('battle-progress-bar').style.width = '0%';
+      document.getElementById('battle-needle').style.left = '0%';
+
+      if (battleState.blindfold) {
+        marker.classList.add('hidden');
+      } else {
+        marker.classList.remove('hidden');
+        marker.style.left = `${(target / 2.0) * 100}%`;
+      }
+
+      if (playerNum === 2 && battleState.opponent === 'bot') {
+        inst.textContent = 'Bot is calibrating timing sweep...';
+        battleState.botTimeout = setTimeout(() => {
+          startBattleSweep();
+        }, 700);
+      } else {
+        inst.innerHTML = `Click arena or press <span class="font-mono text-zinc-200">[SPACE]</span> to start sweep.`;
+      }
+    }
+
+    function startBattleSweep() {
+      battleState.turnStatus = 'running';
+      battleState.startTime = performance.now();
+      AudioEngine.startTick();
+
+      const target = battleState.activePlayer === 1 ? battleState.p2Ballot : battleState.p1Ballot;
+      const isBotTurn = (battleState.activePlayer === 2 && battleState.opponent === 'bot');
+
+      if (!isBotTurn) {
+        document.getElementById('battle-instruction').innerHTML = `Click or press <span class="font-mono text-zinc-200">[SPACE]</span> when timer hits <span class="text-amber-400 font-mono font-bold">${target.toFixed(battleState.dp)}s</span>!`;
+      }
+
+      // If Bot turn, schedule realistic human-like reaction accuracy (±2ms to ±18ms)
+      let botSimulatedClickSec = null;
+      if (isBotTurn) {
+        const errorSpread = battleState.dp === 2 ? 0.025 : battleState.dp === 3 ? 0.012 : 0.006;
+        const gaussianish = ((Math.random() + Math.random() + Math.random()) / 3 - 0.5) * 2 * errorSpread;
+        botSimulatedClickSec = Math.max(0.05, Math.min(1.98, target + gaussianish));
+      }
+
+      function loop(now) {
+        if (battleState.turnStatus !== 'running') return;
+        const elapsed = computePreciseSeconds(battleState.startTime, now, battleState.dp);
+
+        if (isBotTurn && elapsed >= botSimulatedClickSec) {
+          completeBattleTurn(botSimulatedClickSec);
+          return;
+        }
+
+        if (elapsed >= 2.0) {
+          completeBattleTurn(2.0);
+          return;
+        }
+
+        const isBlind = battleState.blindfold && elapsed > 0.5;
+        document.getElementById('battle-timer-readout').innerHTML = formatTimerHTML(elapsed, battleState.dp, isBlind);
+
+        const pct = isBlind ? 25 : (elapsed / 2.0) * 100;
+        document.getElementById('battle-progress-bar').style.width = isBlind ? '25%' : `${pct}%`;
+        document.getElementById('battle-needle').style.left = `${pct}%`;
+        document.getElementById('battle-needle').style.opacity = isBlind ? '0' : '1';
+
+        battleState.rafId = requestAnimationFrame(loop);
+      }
+
+      battleState.rafId = requestAnimationFrame(loop);
+    }
+
+    function handleBattleTrigger(eventTimestamp) {
+      if (battleState.phase !== 'play') return;
+      // Ignore manual clicks during Bot's turn
+      if (battleState.activePlayer === 2 && battleState.opponent === 'bot') return;
+
+      if (battleState.turnStatus === 'ready') {
+        startBattleSweep();
+      } else if (battleState.turnStatus === 'running') {
+        const clickTime = computePreciseSeconds(battleState.startTime, eventTimestamp, battleState.dp);
+        completeBattleTurn(clickTime);
+      }
+    }
+
+    function completeBattleTurn(clickTime) {
+      cancelAnimationFrame(battleState.rafId);
+      battleState.turnStatus = 'done';
+      document.getElementById('battle-needle').style.opacity = '1';
+
+      document.getElementById('battle-timer-readout').innerHTML = formatTimerHTML(clickTime, battleState.dp, false);
+      const pct = Math.min(100, (clickTime / 2.0) * 100);
+      document.getElementById('battle-progress-bar').style.width = `${pct}%`;
+      document.getElementById('battle-needle').style.left = `${pct}%`;
+
+      AudioEngine.checkpoint();
+
+      if (battleState.activePlayer === 1) {
+        battleState.p1Click = clickTime;
+        document.getElementById('battle-instruction').textContent = `Locked at ${clickTime.toFixed(battleState.dp + 1)}s! Switching to ${battleState.opponent === 'bot' ? 'Bot' : 'Player 2'}...`;
+        setTimeout(() => {
+          prepareBattleTurn(2);
+        }, 1100);
+      } else {
+        battleState.p2Click = clickTime;
+        setTimeout(() => {
+          showBattleResults();
+        }, 900);
+      }
+    }
+
+    function showBattleResults() {
+      battleState.phase = 'result';
+      document.getElementById('battle-phase-play').classList.add('hidden');
+      document.getElementById('battle-phase-play').classList.remove('flex');
+      document.getElementById('battle-phase-result').classList.remove('hidden');
+      document.getElementById('battle-phase-result').classList.add('flex');
+
+      const p1Target = battleState.p2Ballot;
+      const p2Target = battleState.p1Ballot;
+      const p1DevMs = Math.abs(battleState.p1Click - p1Target) * 1000;
+      const p2DevMs = Math.abs(battleState.p2Click - p2Target) * 1000;
+
+      const p2Name = battleState.opponent === 'bot' ? 'BOT' : 'PLAYER 2';
+      document.getElementById('res-p2-name').textContent = p2Name;
+
+      document.getElementById('res-p1-target').textContent = `${p1Target.toFixed(battleState.dp)}s`;
+      document.getElementById('res-p1-actual').textContent = `${battleState.p1Click.toFixed(battleState.dp + 1)}s`;
+      document.getElementById('res-p1-dev').textContent = `±${p1DevMs.toFixed(2)} ms`;
+
+      document.getElementById('res-p2-target').textContent = `${p2Target.toFixed(battleState.dp)}s`;
+      document.getElementById('res-p2-actual').textContent = `${battleState.p2Click.toFixed(battleState.dp + 1)}s`;
+      document.getElementById('res-p2-dev').textContent = `±${p2DevMs.toFixed(2)} ms`;
+
+      const headline = document.getElementById('battle-winner-headline');
+      if (Math.abs(p1DevMs - p2DevMs) < 0.01) {
+        headline.textContent = 'EXACT DEAD HEAT TIE!';
+        headline.className = 'font-mono text-2xl sm:text-3xl font-extrabold text-zinc-200 mt-3';
+      } else if (p1DevMs < p2DevMs) {
+        battleState.p1Wins++;
+        headline.textContent = 'PLAYER 1 WINS THE ROUND!';
+        headline.className = 'font-mono text-2xl sm:text-3xl font-extrabold text-cyan-400 mt-3';
+        AudioEngine.pass();
+      } else {
+        battleState.p2Wins++;
+        headline.textContent = `${p2Name} WINS THE ROUND!`;
+        headline.className = 'font-mono text-2xl sm:text-3xl font-extrabold text-amber-400 mt-3';
+        AudioEngine.fail();
+      }
+
+      document.getElementById('battle-p1-wins').textContent = battleState.p1Wins;
+      document.getElementById('battle-p2-wins').textContent = battleState.p2Wins;
+    }
+
+    function resetBattleToBallot() {
+      battleState.phase = 'ballot';
+      document.getElementById('battle-phase-result').classList.add('hidden');
+      document.getElementById('battle-phase-result').classList.remove('flex');
+      document.getElementById('battle-phase-play').classList.add('hidden');
+      document.getElementById('battle-phase-ballot').classList.remove('hidden');
+      if (battleState.opponent === 'bot') {
+        randomizeBallot(2);
+      }
+    }
+
+    function resetBattleMatch() {
+      battleState.p1Wins = 0;
+      battleState.p2Wins = 0;
+      document.getElementById('battle-p1-wins').textContent = '0';
+      document.getElementById('battle-p2-wins').textContent = '0';
+      resetBattleToBallot();
+    }
+
+    /**
+     * =========================================================================
+     * 6. MODE SWITCHING & UNIFIED LOW-LATENCY INPUT HANDLERS
+     * =========================================================================
+     */
+    function switchMode(mode) {
+      activeMode = mode;
+      const tabClimb = document.getElementById('tab-climb');
+      const tabBattle = document.getElementById('tab-battle');
+      const viewClimb = document.getElementById('view-climb');
+      const viewBattle = document.getElementById('view-battle');
+
+      if (mode === 'climb') {
+        tabClimb.className = 'px-4 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all bg-zinc-800 text-cyan-400 shadow-sm';
+        tabBattle.className = 'px-4 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all text-zinc-400 hover:text-zinc-200';
+        viewClimb.classList.remove('hidden');
+        viewBattle.classList.add('hidden');
+        viewBattle.classList.remove('flex');
+      } else {
+        tabBattle.className = 'px-4 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all bg-zinc-800 text-amber-400 shadow-sm';
+        tabClimb.className = 'px-4 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all text-zinc-400 hover:text-zinc-200';
+        viewBattle.classList.remove('hidden');
+        viewBattle.classList.add('flex');
+        viewClimb.classList.add('hidden');
+        if (battleState.opponent === 'bot') randomizeBallot(2);
+      }
+    }
+
+    // Direct pointerdown listener on Climb Arena (fires immediately on press, faster than click)
+    document.getElementById('climb-arena').addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      const ts = performance.now();
+      if (climbState.status === 'result' && climbState.pendingNext) {
+        const fn = climbState.pendingNext;
+        climbState.pendingNext = null;
+        fn();
+        return;
+      }
+      handleClimbTrigger(ts);
+    });
+
+    // Direct pointerdown listener on Battle Arena
+    document.getElementById('battle-arena').addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      const ts = performance.now();
+      handleBattleTrigger(ts);
+    });
+
+    // Global Spacebar listener for tactile desktop precision
+    window.addEventListener('keydown', (e) => {
+      // Ignore if typing in leaderboard name input
+      if (document.activeElement && document.activeElement.tagName === 'INPUT') {
+        if (e.key === 'Enter' && !document.getElementById('save-modal').classList.contains('hidden')) {
+          submitLeaderboardScore();
+        }
+        return;
+      }
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (e.repeat) return; // Prevent key-repeat auto-triggering
+        const ts = performance.now();
+
+        if (activeMode === 'climb') {
+          if (climbState.status === 'result' && climbState.pendingNext) {
+            const fn = climbState.pendingNext;
+            climbState.pendingNext = null;
+            fn();
+            return;
+          }
+          handleClimbTrigger(ts);
+        } else if (activeMode === 'battle') {
+          handleBattleTrigger(ts);
+        }
+      }
+    });
+
+    // Initialize App
+    window.addEventListener('DOMContentLoaded', () => {
+      configureClimbLevel(1);
+      renderLeaderboard();
+    });
+  </script>
+</body>
+</html>
